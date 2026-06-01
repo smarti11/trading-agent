@@ -479,16 +479,6 @@ def main():
   }});
 }})();
 </script>
-<script>
-(function() {{
-  var s = sessionStorage.getItem('scrollY');
-  if (s) {{ window.scrollTo(0, parseInt(s, 10)); sessionStorage.removeItem('scrollY'); }}
-  window.addEventListener('beforeunload', function() {{ sessionStorage.setItem('scrollY', window.scrollY); }});
-  setInterval(function() {{
-    if (document.visibilityState === 'visible') {{ location.reload(); }}
-  }}, 360000);
-}})();
-</script>
 </body></html>"""
 
     Path(OUTPUT).write_text(html)
