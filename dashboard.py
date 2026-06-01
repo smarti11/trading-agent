@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sqlite3, webbrowser, os, json
+import sqlite3, os, json
 import yfinance as yf
 from pathlib import Path
 from datetime import datetime
@@ -482,8 +482,7 @@ def main():
 </body></html>"""
 
     Path(OUTPUT).write_text(html)
-    print(f"\nDashboard saved! Opening in browser...")
-    webbrowser.open("file://" + os.path.abspath(OUTPUT))
+    print(f"Dashboard saved: {OUTPUT}")
 
 if __name__ == "__main__":
     main()
