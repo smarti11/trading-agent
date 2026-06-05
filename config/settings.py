@@ -45,10 +45,12 @@ EMERGENCY_FLOOR_PCT = 0.10      # Emergency exit at 10% adverse move (hard floor
 AGGREGATE_CB_USD   = 30.0       # Circuit breaker: total unrealized loss threshold
 
 # --- Pattern Day Trader (PDT) Rules ---
-# Applies when account balance is under $25,000
-PDT_PROTECTION    = True        # Set False only if account > $25,000
-MAX_DAY_TRADES    = 3           # Max day trades per 5 rolling business days
-MIN_HOLD_HOURS    = 4           # Minimum hours to hold before closing same day
+# FINRA Rule 4210 amended effective June 4, 2026 (SEC approved April 14, 2026).
+# The $25K minimum equity requirement and day-trade-count threshold are eliminated.
+# PDT_PROTECTION is now False — no day-trade counting or same-day hold restrictions.
+PDT_PROTECTION    = False       # Disabled: FINRA PDT rule eliminated June 4, 2026
+MAX_DAY_TRADES    = 3           # Retained for reference; not enforced while PDT_PROTECTION=False
+MIN_HOLD_HOURS    = 4           # Retained for reference; not enforced while PDT_PROTECTION=False
 MAX_HOLD_DAYS     = 3           # Force-close any position held longer than this (calendar days)
 MARKET_OPEN       = "09:30"     # Market open (Eastern)
 MARKET_CLOSE      = "16:00"     # Market close (Eastern)
