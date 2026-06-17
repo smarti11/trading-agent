@@ -226,12 +226,8 @@ def main():
             days_held = (datetime.now() - entry_dt).days
             hours_held = (datetime.now() - entry_dt).seconds // 3600
             held_str = f"{hours_held}h" if days_held == 0 else f"{days_held}d"
-            is_overnight = entry_dt.date() < date_type.today()
-            pdt_html = '<span style="background:#00c89622;color:#00c896;padding:2px 6px;border-radius:3px;font-size:10px">OVERNIGHT</span>' if is_overnight else '<span style="background:#ffd60a22;color:#ffd60a;padding:2px 6px;border-radius:3px;font-size:10px">SAME DAY</span>'
         except:
             held_str = "-"
-            pdt_html = "-"
-        dummy = None  # continue below
         cur = f'${float(r["current_price"]):.3f}' if r["current_price"] else '—'
         # Color current price vs entry
         if r["current_price"]:
@@ -243,9 +239,9 @@ def main():
         else:
             cur_html = '—'
         ts = str(r.get("entry_ts",""))[:16].replace("T"," ")
-        pos_rows += f'<tr><td><b>{r["symbol"]}</b></td><td>{badge(r["action"])}</td><td>{r["quantity"]}</td><td>${float(r["entry_price"]):.3f}</td><td>{cur_html}</td><td>{pspan(r["unrealized_pnl"])}</td><td>{pspan(r["unrealized_pct"],"%")}</td><td style="color:#ff4d6d">${float(r["stop_loss"]):.3f}</td><td style="color:#00c896">${float(r["take_profit"]):.3f}</td><td style="color:#c8d8f0;text-align:center">{held_str}</td><td>{pdt_html}</td><td style="color:#888">{ts}</td></tr>'
+        pos_rows += f'<tr><td><b>{r["symbol"]}</b></td><td>{badge(r["action"])}</td><td>{r["quantity"]}</td><td>${float(r["entry_price"]):.3f}</td><td>{cur_html}</td><td>{pspan(r["unrealized_pnl"])}</td><td>{pspan(r["unrealized_pct"],"%")}</td><td style="color:#ff4d6d">${float(r["stop_loss"]):.3f}</td><td style="color:#00c896">${float(r["take_profit"]):.3f}</td><td style="color:#c8d8f0;text-align:center">{held_str}</td><td style="color:#888">{ts}</td></tr>'
     if not pos_rows:
-        pos_rows = '<tr><td colspan="12" style="text-align:center;color:#666;padding:24px">No open positions</td></tr>'
+        pos_rows = '<tr><td colspan="11" style="text-align:center;color:#666;padding:24px">No open positions</td></tr>'
 
     trade_rows = "".join([f'<tr><td><b>{r["symbol"]}</b></td><td>{badge(r["action"])}</td><td>{r["quantity"]}</td><td>${float(r["price"]):.3f}</td><td style="color:#ffd60a;font-size:11px">{r["mode"]}</td><td style="color:#888">{str(r.get("ts",""))[:16]}</td></tr>' for r in data["trades"]]) or '<tr><td colspan="6" style="text-align:center;color:#666;padding:24px">No trades yet</td></tr>'
     pnl_rows = "".join([f'<tr><td><b>{r["symbol"]}</b></td><td>{pspan(r["pnl_usd"])}</td><td>{pspan(r["pnl_pct"],"%")}</td><td style="color:#888">{str(r.get("exit_ts",""))[:16]}</td></tr>' for r in data["pnl"]]) or '<tr><td colspan="4" style="text-align:center;color:#666;padding:24px">No closed trades yet</td></tr>'
@@ -275,7 +271,7 @@ def main():
 
   <div class="sec">Open Positions — Live Prices</div>
   <div class="tw"><table>
-    <thead><tr><th>Symbol</th><th>Action</th><th>Qty</th><th>Entry</th><th>Current Price</th><th>Unreal P&L $</th><th>Unreal P&L %</th><th>Ref Stop¹</th><th>Take Profit</th><th>Held</th><th>PDT Status</th><th>Opened</th></tr></thead>
+    <thead><tr><th>Symbol</th><th>Action</th><th>Qty</th><th>Entry</th><th>Current Price</th><th>Unreal P&L $</th><th>Unreal P&L %</th><th>Ref Stop¹</th><th>Take Profit</th><th>Held</th><th>Opened</th></tr></thead>
     <tbody>{pos_rows}</tbody>
   </table></div>
 
