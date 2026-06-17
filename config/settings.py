@@ -16,7 +16,7 @@ ETRADE_SANDBOX_KEY     = "60852934b24a76cb7c8a9f4e76dfd08f"
 ETRADE_SANDBOX_SECRET  = "f2afe8b5e3d5256b6f8e94168b44cc4c120173b86677c3e91ea1de877293a6de"
 
 # --- Trade Sizing ---
-TRADE_AMOUNT_USD = 100.00       # Fixed dollar amount per trade
+TRADE_AMOUNT_USD = 500.00       # Fixed dollar amount per trade
 MAX_OPEN_POSITIONS = 5          # Max concurrent positions
 MAX_POSITION_PER_SYMBOL = 1     # Only 1 position per symbol at a time
 
