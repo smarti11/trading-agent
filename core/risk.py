@@ -13,7 +13,10 @@ from config.settings import (
     PDT_PROTECTION, MAX_DAY_TRADES, MIN_HOLD_HOURS, NO_NEW_TRADES_AFTER, MAX_HOLD_DAYS,
     EMERGENCY_FLOOR_PCT, AGGREGATE_CB_USD,
 )
-from db.database import get_open_positions, get_daily_pnl, get_day_trade_count, was_recently_closed
+from db.database import (
+    get_open_positions, count_active_positions, has_active_symbol,
+    get_daily_pnl, get_day_trade_count, was_recently_closed,
+)
 from core.market_trend import is_trade_allowed, get_market_trend
 
 logger = logging.getLogger("trading_agent")
@@ -66,15 +69,13 @@ class RiskManager:
         if daily_pnl <= -MAX_DAILY_LOSS_USD:
             return False, f"Daily loss limit hit (${daily_pnl:.2f}). Agent paused."
 
-        # Check max open positions
-        open_pos = get_open_positions()
-        if len(open_pos) >= MAX_OPEN_POSITIONS:
+        # Check max open positions (includes PENDING reservations)
+        if count_active_positions() >= MAX_OPEN_POSITIONS:
             return False, f"Max open positions ({MAX_OPEN_POSITIONS}) reached"
 
-        # Check if already in this symbol
-        open_symbols = [p["symbol"] for p in open_pos]
-        if symbol in open_symbols:
-            return False, f"Already have an open position in {symbol}"
+        # Check if already in this symbol (OPEN or PENDING)
+        if has_active_symbol(symbol):
+            return False, f"Already have an active position in {symbol}"
 
         # PDT check — block new trades after 3:30pm ET
         if PDT_PROTECTION and self.is_too_late_to_trade():

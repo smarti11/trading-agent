@@ -19,9 +19,12 @@ import time
 import sys
 from datetime import datetime
 
-from config.settings import PAPER_TRADING, SCAN_INTERVAL_SEC, TRADE_AMOUNT_USD
-from data.fetcher import get_most_active, get_price_history, get_current_price, get_ohlc_history
-from core.atr import atr_filter, overextension_check
+from config.settings import (
+    PAPER_TRADING, SCAN_INTERVAL_SEC, TRADE_AMOUNT_USD,
+    ALLOW_SHORTS, USE_ATR_STOPS,
+)
+from data.fetcher import get_most_active, get_symbol_data, get_current_price
+from core.atr import atr_filter, overextension_check, get_atr_stops
 from core.market_trend import get_market_trend
 from data.corporate_events import is_safe_to_trade
 from core.signals import evaluate
@@ -29,19 +32,16 @@ from core.risk import RiskManager
 from broker.etrade import ETradeClient
 from db.database import (
     init_db, log_signal, log_trade,
-    open_position, close_position,
-    get_open_positions, print_summary,
+    open_position_pending, confirm_position, fail_pending_position,
+    close_position, get_open_positions, print_summary,
     stamp_strategy_version,
 )
 
-CURRENT_VERSION = "v3.0_no_stop"
+CURRENT_VERSION = "v3.1_atomic_stops"
 
 _preopen_checked_date = None
 _pending_gap_closes: set = set()
 
-# ------------------------------------------------------------------
-# Logging setup
-# ------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -53,12 +53,173 @@ logging.basicConfig(
 logger = logging.getLogger("trading_agent")
 
 
+def _compute_stops(action: str, entry_price: float, atr_val: float, risk: RiskManager) -> tuple[float, float]:
+    """Prefer ATR-based stops when enabled and ATR is available."""
+    if USE_ATR_STOPS and atr_val > 0:
+        return get_atr_stops(action, entry_price, atr_val)
+    return risk.get_stop_take(action, entry_price)
+
+
+def _monitor_open_positions(client: ETradeClient, risk: RiskManager, mode: str):
+    """Check exits, gap closes, and circuit breaker for open positions."""
+    global _pending_gap_closes
+
+    open_pos = get_open_positions()
+    if not open_pos:
+        return
+
+    et_now = risk.get_eastern_time()
+    pos_by_symbol = {p["symbol"]: p for p in open_pos}
+    current_prices = {}
+    for pos in open_pos:
+        p = get_current_price(pos["symbol"])
+        if p:
+            current_prices[pos["symbol"]] = p
+        logger.info(
+            f"Position check: {pos['symbol']} | action={pos['action']} "
+            f"entry=${pos['entry_price']} ref_stop=${pos['stop_loss']} "
+            f"TP=${pos['take_profit']} current=${p}"
+        )
+
+    risk.check_circuit_breaker(open_pos, current_prices)
+
+    if _pending_gap_closes and et_now.hour >= 9 and et_now.minute >= 30:
+        for sym in list(_pending_gap_closes):
+            pos = pos_by_symbol.get(sym)
+            if not pos:
+                _pending_gap_closes.discard(sym)
+                continue
+            price = current_prices.get(sym)
+            if not price:
+                continue
+            exit_action = "SELL" if pos["action"] == "BUY" else "BUY"
+            qty = pos["quantity"]
+            logger.info(f"Gap-close executing: {sym} @ ${price} — {exit_action} {qty} shares")
+            try:
+                client.place_order(sym, exit_action, qty)
+                close_position(sym, price)
+                log_trade(sym, exit_action, qty, price, mode, "FILLED",
+                          notes="gap_close_preopen", strategy_version=CURRENT_VERSION)
+                _pending_gap_closes.discard(sym)
+                logger.info(f"  ✓ Gap-closed {sym}")
+            except Exception as e:
+                logger.error(f"Gap-close order failed for {sym}: {e}")
+
+    exits = risk.check_exits(current_prices)
+    for symbol, price, reason in exits:
+        pos = pos_by_symbol.get(symbol)
+        if not pos:
+            continue
+        exit_action = "SELL" if pos["action"] == "BUY" else "BUY"
+        qty = pos["quantity"]
+        logger.info(f"Exiting {symbol} @ ${price} ({reason}) — {exit_action} {qty} shares")
+        try:
+            client.place_order(symbol, exit_action, qty)
+            close_position(symbol, price)
+            log_trade(symbol, exit_action, qty, price, mode, "FILLED",
+                      notes=reason, strategy_version=CURRENT_VERSION)
+            logger.info(f"  ✓ Closed {symbol} successfully")
+        except Exception as e:
+            logger.error(f"Exit order failed for {symbol}: {e}")
+
+
+def _scan_for_signals(client: ETradeClient, risk: RiskManager, mode: str) -> int:
+    """Scan the universe for new entry signals. Returns orders placed."""
+    trend_data = get_market_trend()
+    current_trend = trend_data.get("trend", "CHOP")
+    symbols = get_most_active()
+    logger.info(f"Scanning {len(symbols)} symbols: {symbols[:10]}...")
+    action_count = 0
+
+    for symbol in symbols:
+        sym_data = get_symbol_data(symbol)
+        if sym_data is None:
+            continue
+
+        prices = sym_data.closes
+        ohlc = sym_data.ohlc
+
+        safe, corp_reason = is_safe_to_trade(symbol)
+        if not safe:
+            logger.info(f"{symbol}: Skipped — {corp_reason}")
+            continue
+
+        signal = evaluate(symbol, prices, market_trend=current_trend)
+        if signal.direction == "NONE":
+            continue
+
+        if signal.direction == "SELL" and not ALLOW_SHORTS:
+            logger.info(f"{symbol}: Skipped — SELL signal but ALLOW_SHORTS=False")
+            continue
+
+        atr_val = 0.0
+        if ohlc is not None and len(ohlc) >= 14:
+            tradeable, atr_reason, atr_val, atr_pct = atr_filter(
+                symbol, ohlc["Close"], ohlc["High"], ohlc["Low"],
+                direction=signal.direction, market_trend=current_trend,
+            )
+            if not tradeable:
+                logger.info(f"{symbol}: Skipped — {atr_reason}")
+                continue
+
+            overextended, ext_reason = overextension_check(
+                symbol, ohlc["Close"], ohlc["High"], ohlc["Low"]
+            )
+            if overextended:
+                logger.info(f"{symbol}: Skipped — {ext_reason}")
+                continue
+
+        signal_id = log_signal(signal)
+        logger.info(f"SIGNAL [{signal.direction}] {symbol} | {signal.reason}")
+
+        allowed, risk_reason = risk.can_open_trade_direction(symbol, signal.direction)
+        if not allowed:
+            logger.info(f"  ↳ Skipped: {risk_reason}")
+            continue
+
+        current_price = sym_data.current_price or signal.close_price
+        shares = client.calculate_shares(current_price)
+        if shares < 1:
+            logger.warning(
+                f"  ↳ {symbol} skipped — price ${current_price} exceeds "
+                f"${TRADE_AMOUNT_USD} per trade limit"
+            )
+            continue
+
+        stop, take = _compute_stops(signal.direction, current_price, atr_val, risk)
+
+        open_position_pending(symbol, signal.direction, shares, current_price, stop, take)
+        try:
+            client.place_order(symbol, signal.direction, shares)
+            confirm_position(symbol)
+            log_trade(
+                symbol, signal.direction, shares, current_price,
+                mode, "FILLED" if not PAPER_TRADING else "PAPER",
+                signal_id=signal_id, strategy_version=CURRENT_VERSION
+            )
+            logger.info(
+                f"  ↳ {'[PAPER] ' if PAPER_TRADING else ''}Order placed: "
+                f"{signal.direction} {shares} {symbol} @ ${current_price} "
+                f"| ref_stop=${stop} TP=${take}"
+            )
+            action_count += 1
+        except Exception as e:
+            fail_pending_position(symbol)
+            logger.error(f"  ↳ Order failed for {symbol}: {e}")
+            log_trade(symbol, signal.direction, shares, current_price,
+                      mode, "FAILED", notes=str(e), signal_id=signal_id,
+                      strategy_version=CURRENT_VERSION)
+
+    return action_count
+
+
 def run_scan(client: ETradeClient, risk: RiskManager, mode: str):
     """One full scan cycle."""
     global _preopen_checked_date, _pending_gap_closes
     logger.info(f"--- Scan started [{mode}] [{CURRENT_VERSION}] {datetime.now().strftime('%H:%M:%S')} ---")
 
     et_now = risk.get_eastern_time()
+    market_open = risk.is_market_open()
 
     # Pre-open window: 9:10–9:29 ET — scan for gap risk, queue closes
     if et_now.hour == 9 and 10 <= et_now.minute < 30:
@@ -71,158 +232,18 @@ def run_scan(client: ETradeClient, risk: RiskManager, mode: str):
                 gaps = check_preopen_gaps(open_pos_for_gap)
                 for sym, pre_px, gap_pct in gaps:
                     _pending_gap_closes.add(sym)
-                    logger.warning(f"Gap-close queued: {sym} ({gap_pct*100:+.1f}%) — will close at open")
-
-    symbols = get_most_active()
-    logger.info(f"Scanning {len(symbols)} symbols: {symbols[:10]}...")
-
-    # --- Check exits on open positions ---
-    open_pos = get_open_positions()
-    if open_pos:
-        pos_by_symbol = {p["symbol"]: p for p in open_pos}
-        current_prices = {}
-        for pos in open_pos:
-            p = get_current_price(pos["symbol"])
-            if p:
-                current_prices[pos["symbol"]] = p
-            logger.info(f"Position check: {pos['symbol']} | action={pos['action']} entry=${pos['entry_price']} ref_stop=${pos['stop_loss']} TP=${pos['take_profit']} current=${p}")
-
-        # Aggregate circuit breaker check
-        risk.check_circuit_breaker(open_pos, current_prices)
-
-        # Flush gap-close queue at/after market open
-        if _pending_gap_closes and et_now.hour >= 9 and et_now.minute >= 30:
-            for sym in list(_pending_gap_closes):
-                pos = pos_by_symbol.get(sym)
-                if not pos:
-                    _pending_gap_closes.discard(sym)
-                    continue
-                price = current_prices.get(sym)
-                if not price:
-                    continue
-                exit_action = "SELL" if pos["action"] == "BUY" else "BUY"
-                qty = pos["quantity"]
-                logger.info(f"Gap-close executing: {sym} @ ${price} — {exit_action} {qty} shares")
-                try:
-                    client.place_order(sym, exit_action, qty)
-                    close_position(sym, price)
-                    log_trade(sym, exit_action, qty, price, mode, "FILLED",
-                              notes="gap_close_preopen", strategy_version=CURRENT_VERSION)
-                    _pending_gap_closes.discard(sym)
-                    logger.info(f"  ✓ Gap-closed {sym}")
-                except Exception as e:
-                    logger.error(f"Gap-close order failed for {sym}: {e}")
-
-        exits = risk.check_exits(current_prices)
-        for symbol, price, reason in exits:
-            pos = pos_by_symbol.get(symbol)
-            if not pos:
-                continue
-            exit_action = "SELL" if pos["action"] == "BUY" else "BUY"
-            qty = pos["quantity"]
-            logger.info(f"Exiting {symbol} @ ${price} ({reason}) — {exit_action} {qty} shares")
-            try:
-                client.place_order(symbol, exit_action, qty)
-                close_position(symbol, price)
-                log_trade(symbol, exit_action, qty, price, mode, "FILLED",
-                          notes=reason, strategy_version=CURRENT_VERSION)
-                logger.info(f"  ✓ Closed {symbol} successfully")
-            except Exception as e:
-                logger.error(f"Exit order failed for {symbol}: {e}")
-
-    # --- Scan for new signals ---
-    # Get current market trend for this scan cycle
-    trend_data = get_market_trend()
-    current_trend = trend_data.get("trend", "CHOP")
-
-    action_count = 0
-    for symbol in symbols:
-        prices = get_price_history(symbol)
-        if prices is None:
-            continue
-
-        # Corporate events check — skip acquired/delisted/pinned symbols
-        safe, corp_reason = is_safe_to_trade(symbol)
-        if not safe:
-            logger.info(f"{symbol}: Skipped — {corp_reason}")
-            continue
-
-        # ATR volatility filter — skip symbols that are too volatile or too thin
-        ohlc = get_ohlc_history(symbol)
-        if ohlc is not None and len(ohlc) >= 14:
-            tradeable, atr_reason, atr_val, atr_pct = atr_filter(
-                symbol, ohlc["Close"], ohlc["High"], ohlc["Low"],
-                direction=None, market_trend=current_trend
-            )
-            if not tradeable:
-                # If blocked by ATR, check if a BUY signal in BULL market
-                # would pass with the looser cap
-                if current_trend == "BULL":
-                    tradeable_bull, _, _, _ = atr_filter(
-                        symbol, ohlc["Close"], ohlc["High"], ohlc["Low"],
-                        direction="BUY", market_trend="BULL"
+                    logger.warning(
+                        f"Gap-close queued: {sym} ({gap_pct*100:+.1f}%) — will close at open"
                     )
-                    if tradeable_bull:
-                        # Allow through — will only trade if BUY signal fires
-                        logger.info(f"{symbol}: ATR={atr_pct:.1f}% — allowed under BULL+BUY relaxed cap")
-                    else:
-                        logger.info(f"{symbol}: Skipped — {atr_reason}")
-                        continue
-                else:
-                    logger.info(f"{symbol}: Skipped — {atr_reason}")
-                    continue
 
-            # Overextension check — skip news-driven moves > 3x ATR
-            overextended, ext_reason = overextension_check(
-                symbol, ohlc["Close"], ohlc["High"], ohlc["Low"]
-            )
-            if overextended:
-                logger.info(f"{symbol}: Skipped — {ext_reason}")
-                continue
-        
-        signal = evaluate(symbol, prices, market_trend=current_trend)
+    _monitor_open_positions(client, risk, mode)
 
-        # Log all actionable signals
-        if signal.direction != "NONE":
-            signal_id = log_signal(signal)
-            logger.info(f"SIGNAL [{signal.direction}] {symbol} | {signal.reason}")
+    if not market_open:
+        logger.info("Market closed — skipping new signal scan")
+        logger.info("--- Scan complete (position check only). ---\n")
+        return
 
-            # Risk check including market trend filter
-            allowed, risk_reason = risk.can_open_trade_direction(symbol, signal.direction)
-            if not allowed:
-                logger.info(f"  ↳ Skipped: {risk_reason}")
-                continue
-
-            # Size the order
-            current_price = get_current_price(symbol) or signal.close_price
-            shares = client.calculate_shares(current_price)
-            if shares < 1:
-                logger.warning(f"  ↳ {symbol} skipped — price ${current_price} exceeds ${TRADE_AMOUNT_USD} per trade limit")
-                continue
-
-            stop, take = risk.get_stop_take(signal.direction, current_price)
-
-            # Place order
-            try:
-                result = client.place_order(symbol, signal.direction, shares)
-                open_position(symbol, signal.direction, shares, current_price, stop, take)
-                log_trade(
-                    symbol, signal.direction, shares, current_price,
-                    mode, "FILLED" if not PAPER_TRADING else "PAPER",
-                    signal_id=signal_id, strategy_version=CURRENT_VERSION
-                )
-                logger.info(
-                    f"  ↳ {'[PAPER] ' if PAPER_TRADING else ''}Order placed: "
-                    f"{signal.direction} {shares} {symbol} @ ${current_price} "
-                    f"| ref_stop=${stop} TP=${take}"
-                )
-                action_count += 1
-            except Exception as e:
-                logger.error(f"  ↳ Order failed for {symbol}: {e}")
-                log_trade(symbol, signal.direction, shares, current_price,
-                          mode, "FAILED", notes=str(e), signal_id=signal_id,
-                          strategy_version=CURRENT_VERSION)
-
+    action_count = _scan_for_signals(client, risk, mode)
     logger.info(f"--- Scan complete. {action_count} orders placed. ---\n")
 
 
@@ -233,13 +254,11 @@ def main():
     parser.add_argument("--summary", action="store_true", help="Print summary and exit")
     args = parser.parse_args()
 
-    # Summary shortcut
     if args.summary:
         init_db()
         print_summary()
         return
 
-    # Double-gate for live trading
     if args.live and PAPER_TRADING:
         print("\n⚠️  ERROR: --live flag passed but PAPER_TRADING=True in config/settings.py")
         print("Set PAPER_TRADING = False in config/settings.py AND pass --live to enable live trading.\n")
@@ -260,21 +279,16 @@ def main():
             print("Aborted.")
             sys.exit(0)
 
-    # Initialize
     init_db()
     stamp_strategy_version(
         CURRENT_VERSION,
-        "Removed 3% fixed stop; added 10% emergency floor, preopen gap-close, aggregate circuit breaker"
+        "Atomic PENDING positions, unified data fetch, ATR stops, market-hours scan gating"
     )
     risk = RiskManager()
     client = ETradeClient()
 
-    # Authenticate with retry. If the OAuth verifier isn't available yet
-    # (e.g. running under nohup and the user hasn't dropped the code into
-    # config/.etrade_verifier yet), we retry instead of crashing the agent.
-    # --once exits after the first failure; the persistent loop keeps trying.
     auth_attempts = 0
-    auth_max_attempts = 1 if args.once else 12  # ~6 hours under nohup
+    auth_max_attempts = 1 if args.once else 12
     while True:
         try:
             client.authenticate()
@@ -292,7 +306,6 @@ def main():
             logger.info("Retrying auth in 60 seconds...")
             time.sleep(60)
 
-    # Run loop
     if args.once:
         run_scan(client, risk, mode)
         print_summary()
@@ -308,7 +321,7 @@ def main():
                 break
             except Exception as e:
                 logger.error(f"Unhandled error in scan loop: {e}", exc_info=True)
-                time.sleep(30)  # brief pause before retrying
+                time.sleep(30)
 
 
 if __name__ == "__main__":

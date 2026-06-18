@@ -7,8 +7,9 @@ Auto-creates tables on first run.
 
 import sqlite3
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
 from config.settings import DB_PATH
 
 logger = logging.getLogger("trading_agent")
@@ -18,6 +19,7 @@ def get_conn():
     Path(DB_PATH).parent.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -86,12 +88,24 @@ def init_db():
             description TEXT
         );
         """)
-        # Idempotent migration: add strategy_version column to trades if absent
         try:
             conn.execute("ALTER TABLE trades ADD COLUMN strategy_version TEXT")
         except Exception:
             pass
+    cleanup_stale_pending_positions()
     logger.info("Database initialized")
+
+
+def cleanup_stale_pending_positions(max_age_minutes: int = 5):
+    """Mark abandoned PENDING positions as FAILED (e.g. crash mid-order)."""
+    cutoff = (datetime.now() - timedelta(minutes=max_age_minutes)).isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE positions SET status='FAILED' WHERE status='PENDING' AND entry_ts < ?",
+            (cutoff,),
+        )
+        if cur.rowcount:
+            logger.warning(f"Cleaned up {cur.rowcount} stale PENDING position(s)")
 
 
 def log_signal(signal) -> int:
@@ -109,7 +123,8 @@ def log_signal(signal) -> int:
         return cur.lastrowid
 
 
-def log_trade(symbol, action, quantity, price, mode, status, order_ref=None, signal_id=None, notes=None, strategy_version=None):
+def log_trade(symbol, action, quantity, price, mode, status, order_ref=None, signal_id=None,
+              notes=None, strategy_version=None):
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO trades (ts, symbol, action, quantity, price, amount_usd, mode, status, order_ref, signal_id, notes, strategy_version)
@@ -120,7 +135,35 @@ def log_trade(symbol, action, quantity, price, mode, status, order_ref=None, sig
         ))
 
 
+def open_position_pending(symbol, action, quantity, entry_price, stop_loss, take_profit):
+    """Reserve a position slot before placing a broker order."""
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO positions (symbol, action, quantity, entry_price, entry_ts, stop_loss, take_profit, status)
+            VALUES (?,?,?,?,?,?,?,'PENDING')
+        """, (symbol, action, quantity, entry_price, datetime.now().isoformat(), stop_loss, take_profit))
+
+
+def confirm_position(symbol):
+    """Mark a PENDING position as OPEN after a successful broker fill."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE positions SET status='OPEN' WHERE symbol=? AND status='PENDING'",
+            (symbol,),
+        )
+
+
+def fail_pending_position(symbol):
+    """Mark a PENDING position as FAILED after a broker error."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE positions SET status='FAILED' WHERE symbol=? AND status='PENDING'",
+            (symbol,),
+        )
+
+
 def open_position(symbol, action, quantity, entry_price, stop_loss, take_profit):
+    """Direct open — used for backward compatibility and paper fills."""
     with get_conn() as conn:
         conn.execute("""
             INSERT OR REPLACE INTO positions (symbol, action, quantity, entry_price, entry_ts, stop_loss, take_profit, status)
@@ -130,7 +173,9 @@ def open_position(symbol, action, quantity, entry_price, stop_loss, take_profit)
 
 def close_position(symbol, exit_price):
     with get_conn() as conn:
-        row = conn.execute("SELECT * FROM positions WHERE symbol=? AND status='OPEN'", (symbol,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM positions WHERE symbol=? AND status='OPEN'", (symbol,)
+        ).fetchone()
         if not row:
             return
         pnl_usd = (exit_price - row["entry_price"]) * row["quantity"]
@@ -147,13 +192,32 @@ def close_position(symbol, exit_price):
 
 
 def get_open_positions() -> list:
+    """Return filled positions only (OPEN status)."""
     with get_conn() as conn:
         return conn.execute("SELECT * FROM positions WHERE status='OPEN'").fetchall()
 
 
+def count_active_positions() -> int:
+    """Count OPEN + PENDING positions toward the max-position limit."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as n FROM positions WHERE status IN ('OPEN', 'PENDING')"
+        ).fetchone()
+        return row["n"] or 0
+
+
+def has_active_symbol(symbol: str) -> bool:
+    """True if symbol has an OPEN or PENDING position."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM positions WHERE symbol=? AND status IN ('OPEN', 'PENDING')",
+            (symbol,),
+        ).fetchone()
+        return row is not None
+
+
 def was_recently_closed(symbol: str, hours: int = 24) -> bool:
     """Returns True if symbol was closed within the last N hours."""
-    from datetime import datetime, timedelta
     cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
     with get_conn() as conn:
         row = conn.execute(
@@ -165,8 +229,7 @@ def was_recently_closed(symbol: str, hours: int = 24) -> bool:
 
 def get_day_trade_count(days: int = 5) -> int:
     """Count same-day open+close trades in the last N business days."""
-    from datetime import date, timedelta
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    cutoff = (datetime.now().date() - timedelta(days=days)).isoformat()
     with get_conn() as conn:
         row = conn.execute(
             """SELECT COUNT(*) as n FROM pnl
@@ -180,7 +243,8 @@ def get_daily_pnl() -> float:
     today = datetime.now().date().isoformat()
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT SUM(pnl_usd) as total FROM pnl WHERE exit_ts LIKE ?", (f"{today}%",)
+            "SELECT SUM(pnl_usd) as total FROM pnl WHERE date(exit_ts) = ?",
+            (today,),
         ).fetchone()
         return row["total"] or 0.0
 

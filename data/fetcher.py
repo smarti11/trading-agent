@@ -5,15 +5,18 @@ Fetches the most active stocks for the day and pulls OHLCV history
 using yfinance (free, no API key needed).
 """
 
+from dataclasses import dataclass
+from typing import Optional
+
 import yfinance as yf
 import pandas as pd
 import requests
 import logging
+
 from config.settings import TOP_ACTIVE_COUNT
 
 logger = logging.getLogger("trading_agent")
 
-# Fallback static watchlist if scraping fails
 FALLBACK_SYMBOLS = [
     "AAPL","TSLA","NVDA","AMD","AMZN","MSFT","META","GOOGL","SPY","QQQ",
     "SOFI","PLTR","BAC","F","T","INTC","WFC","C","XOM","JPM",
@@ -21,12 +24,16 @@ FALLBACK_SYMBOLS = [
 ]
 
 
+@dataclass
+class SymbolData:
+    symbol: str
+    closes: pd.Series
+    ohlc: Optional[pd.DataFrame]
+    current_price: Optional[float]
+
+
 def get_most_active(n: int = TOP_ACTIVE_COUNT) -> list[str]:
-    """
-    Fetch the most active US stock symbols for today.
-    Uses Yahoo Finance's most-active screener endpoint.
-    Falls back to a static list if the request fails.
-    """
+    """Fetch the most active US stock symbols for today."""
     try:
         url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
         params = {
@@ -49,11 +56,10 @@ def get_most_active(n: int = TOP_ACTIVE_COUNT) -> list[str]:
         return FALLBACK_SYMBOLS[:n]
 
 
-def get_price_history(symbol: str, period: str = "60d", interval: str = "1d"):
+def get_symbol_data(symbol: str, period: str = "60d", interval: str = "1d") -> Optional[SymbolData]:
     """
-    Returns a pandas Series of closing prices for the symbol.
-    period: how far back ('60d', '1y', etc.)
-    interval: bar size ('1d', '1h', '5m')
+    Single yfinance fetch returning close series, OHLC, and last price.
+    Replaces separate get_price_history / get_ohlc_history / get_current_price calls.
     """
     try:
         ticker = yf.Ticker(symbol)
@@ -61,33 +67,43 @@ def get_price_history(symbol: str, period: str = "60d", interval: str = "1d"):
         if df.empty or len(df) < 25:
             logger.warning(f"{symbol}: insufficient history ({len(df)} bars)")
             return None
-        return df["Close"].dropna()
+
+        closes = df["Close"].dropna()
+        ohlc = df[["Open", "High", "Low", "Close"]].dropna()
+
+        current_price = None
+        try:
+            current_price = round(float(ticker.fast_info.last_price), 4)
+        except Exception:
+            current_price = round(float(closes.iloc[-1]), 4)
+
+        return SymbolData(
+            symbol=symbol,
+            closes=closes,
+            ohlc=ohlc if len(ohlc) >= 20 else None,
+            current_price=current_price,
+        )
     except Exception as e:
-        logger.warning(f"{symbol}: history fetch error — {e}")
+        logger.warning(f"{symbol}: data fetch error — {e}")
         return None
+
+
+def get_price_history(symbol: str, period: str = "60d", interval: str = "1d"):
+    """Returns a pandas Series of closing prices for the symbol."""
+    data = get_symbol_data(symbol, period, interval)
+    return data.closes if data else None
 
 
 def get_ohlc_history(symbol: str, period: str = "60d", interval: str = "1d"):
-    """
-    Returns a DataFrame with Open, High, Low, Close columns for ATR calculation.
-    Returns None if insufficient data.
-    """
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, interval=interval, auto_adjust=True)
-        if df.empty or len(df) < 20:
-            return None
-        return df[["Open", "High", "Low", "Close"]].dropna()
-    except Exception as e:
-        logger.warning(f"{symbol}: OHLC fetch error — {e}")
-        return None
+    """Returns OHLC DataFrame for ATR calculation."""
+    data = get_symbol_data(symbol, period, interval)
+    return data.ohlc if data else None
 
 
 def get_current_price(symbol: str):
-    """Fast single-price fetch."""
+    """Fast single-price fetch for position monitoring."""
     try:
         ticker = yf.Ticker(symbol)
-        data = ticker.fast_info
-        return round(data.last_price, 4)
+        return round(float(ticker.fast_info.last_price), 4)
     except Exception:
         return None

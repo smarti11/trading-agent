@@ -58,7 +58,7 @@ def get_market_trend(force_refresh: bool = False) -> dict:
     if (not force_refresh and
         _trend_cache["last_check"] is not None and
         _trend_cache["trend"] is not None):
-        mins_since = (datetime.now() - _trend_cache["last_check"]).seconds / 60
+        mins_since = (datetime.now() - _trend_cache["last_check"]).total_seconds() / 60
         if mins_since < _trend_cache["cache_mins"]:
             return _trend_cache.copy()
 

@@ -10,9 +10,10 @@ import sys
 import time
 from pathlib import Path
 
+from core.risk import RiskManager
+
 ROOT = Path(__file__).parent
 
-# Structured log goes to logs/regen.log; stdout is captured by nohup → logs/regen.out
 log_path = ROOT / "logs" / "regen.log"
 log_path.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -26,8 +27,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SCRIPT = ROOT / "dashboard.py"
-REBUILD_INTERVAL_S = 5 * 60  # 5 minutes
-SUBPROCESS_TIMEOUT_S = 60    # dashboard.py reads live prices; 60 s is generous
+REBUILD_INTERVAL_S = 5 * 60
+SUBPROCESS_TIMEOUT_S = 60
 
 
 def rebuild() -> bool:
@@ -35,7 +36,7 @@ def rebuild() -> bool:
     try:
         result = subprocess.run(
             [sys.executable, str(DASHBOARD_SCRIPT)],
-            cwd=str(ROOT),           # so DB_PATH="db/trades.db" resolves correctly
+            cwd=str(ROOT),
             timeout=SUBPROCESS_TIMEOUT_S,
             capture_output=True,
             text=True,
@@ -62,12 +63,16 @@ def main():
     logger.info("Script: %s", DASHBOARD_SCRIPT)
     logger.info("Rebuild interval: %d min", REBUILD_INTERVAL_S // 60)
 
-    # Immediate build at startup so there's no cold-start wait
+    risk = RiskManager()
+
     logger.info("Initial build")
     rebuild()
 
     while True:
         time.sleep(REBUILD_INTERVAL_S)
+        if not risk.is_market_open():
+            logger.info("Market closed — skipping dashboard rebuild")
+            continue
         logger.info("Periodic rebuild (%dmin)", REBUILD_INTERVAL_S // 60)
         rebuild()
 

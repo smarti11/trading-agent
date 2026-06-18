@@ -34,11 +34,15 @@ trading-agent/
 3. You'll receive **two sets** of keys:
    - **Sandbox** keys (paper trading) → use these first
    - **Production** keys (live trading) → use only when ready
-4. Add your keys to `config/settings.py`
+4. Add your keys via environment variables (recommended) or `config/settings.py`:
+```bash
+export ETRADE_SANDBOX_KEY=your_sandbox_key
+export ETRADE_SANDBOX_SECRET=your_sandbox_secret
+```
 
 ### 2. Install Python dependencies
 ```bash
-cd ~/trading-agent
+cd ~/agents/trading-agent
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -100,11 +104,14 @@ A trade fires when **2 of 3** indicators agree on direction:
 
 | Setting              | Default | Description                    |
 |----------------------|---------|--------------------------------|
-| TRADE_AMOUNT_USD     | $100    | Fixed size per trade           |
-| STOP_LOSS_PCT        | 3%      | Auto exit on loss              |
-| TAKE_PROFIT_PCT      | 5%      | Auto exit on gain              |
+| TRADE_AMOUNT_USD     | $500    | Fixed size per trade           |
+| USE_ATR_STOPS        | True    | ATR-based stop/take when OHLC available |
+| ALLOW_SHORTS         | False   | Block SELL-to-open signals     |
+| STOP_LOSS_PCT        | 3%      | Fallback reference stop        |
+| TAKE_PROFIT_PCT      | 5%      | Fallback take profit           |
 | MAX_OPEN_POSITIONS   | 5       | Max concurrent trades          |
 | MAX_DAILY_LOSS_USD   | $300    | Agent pauses if hit            |
+| AGGREGATE_CB_USD     | $200    | Aggregate unrealized loss halt |
 | SCAN_INTERVAL_SEC    | 300     | How often to scan (5 min)      |
 
 ---
@@ -134,12 +141,12 @@ cat > ~/Library/LaunchAgents/com.tradingagent.plist << EOF
     <key>Label</key><string>com.tradingagent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/YOUR_USERNAME/trading-agent/venv/bin/python</string>
-        <string>/Users/YOUR_USERNAME/trading-agent/agent.py</string>
+        <string>/Users/YOUR_USERNAME/agents/trading-agent/venv/bin/python</string>
+        <string>/Users/YOUR_USERNAME/agents/trading-agent/agent.py</string>
     </array>
     <key>RunAtLoad</key><true/>
-    <key>StandardOutPath</key><string>/Users/YOUR_USERNAME/trading-agent/logs/stdout.log</string>
-    <key>StandardErrorPath</key><string>/Users/YOUR_USERNAME/trading-agent/logs/stderr.log</string>
+    <key>StandardOutPath</key><string>/Users/YOUR_USERNAME/agents/trading-agent/logs/stdout.log</string>
+    <key>StandardErrorPath</key><string>/Users/YOUR_USERNAME/agents/trading-agent/logs/stderr.log</string>
 </dict>
 </plist>
 EOF
