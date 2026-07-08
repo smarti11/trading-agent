@@ -152,3 +152,67 @@ cat > ~/Library/LaunchAgents/com.tradingagent.plist << EOF
 EOF
 launchctl load ~/Library/LaunchAgents/com.tradingagent.plist
 ```
+
+---
+
+## Options Trading Agent
+
+A parallel agent for **directional long options** (calls on oversold, puts on overbought) using the same mean-reversion signal engine as the equity agent. It runs independently and does not affect the equity strategy lock in `PATH_C_COMMITMENT.md`.
+
+### Architecture
+
+```
+options_agent.py              ← Options entry point
+config/options_settings.py    ← Options-specific parameters
+core/options/
+  ├── chain.py                ← Contract selection + OCC symbols
+  ├── signals.py              ← Maps equity signals → calls/puts
+  └── risk.py                 ← Premium-based exits, DTE limits
+data/options_fetcher.py       ← yfinance option chains
+broker/options_orders.py      ← E*Trade OPTN order placement
+db/options_database.py        ← Separate SQLite DB (db/options_trades.db)
+```
+
+### Run in paper mode
+
+```bash
+python options_agent.py --once     # single scan (good for testing)
+python options_agent.py            # continuous scan loop
+python options_agent.py --summary  # P&L summary
+```
+
+Or use the shell wrapper:
+
+```bash
+chmod +x run_options_agent.sh
+./run_options_agent.sh --once
+```
+
+### Options strategy
+
+| Equity signal | Options action |
+|---------------|----------------|
+| BUY (oversold) | Buy ATM/near-ATM **call** (~30–55 delta) |
+| SELL (overbought) | Buy ATM/near-ATM **put** |
+
+Contract selection filters: 21–60 DTE (target 35), min open interest/volume, max bid-ask spread 15%.
+
+### Options risk parameters (`config/options_settings.py`)
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| OPTIONS_TRADE_AMOUNT_USD | $500 | Max premium budget per trade |
+| MAX_OPTIONS_POSITIONS | 3 | Max concurrent option positions |
+| STOP_LOSS_PREMIUM_PCT | 50% | Exit if premium falls 50% |
+| TAKE_PROFIT_PREMIUM_PCT | 100% | Exit if premium doubles |
+| FORCE_CLOSE_DTE | 7 | Close before expiration week |
+
+### Live options trading
+
+Requires E*Trade options approval on your account. Set `PAPER_TRADING = False` in `config/settings.py`, then:
+
+```bash
+python options_agent.py --live
+```
+
+**Note:** yfinance chains are used for paper mode and signal research. For live execution, verify quotes against your broker before relying on fills.
