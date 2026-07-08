@@ -171,6 +171,7 @@ core/options/
 data/options_fetcher.py       ← yfinance option chains
 broker/options_orders.py      ← E*Trade OPTN order placement
 db/options_database.py        ← Separate SQLite DB (db/options_trades.db)
+options_dashboard.py          ← Separate web dashboard (port 8081)
 ```
 
 ### Run in paper mode

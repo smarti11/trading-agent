@@ -15,6 +15,7 @@ config/*.key
 config/*.secret
 .DS_Store
 dashboard.html
+options_dashboard.html
 dashboard.log
 .circuit_breaker
 .options_circuit_breaker
