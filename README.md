@@ -217,3 +217,47 @@ python options_agent.py --live
 ```
 
 **Note:** yfinance chains are used for paper mode and signal research. For live execution, verify quotes against your broker before relying on fills.
+
+### Options dashboard (separate from equity)
+
+The options agent has its **own** dashboard — it does not modify `dashboard.html`.
+
+```bash
+# Generate dashboard HTML
+python3 options_dashboard.py
+
+# Serve on port 8081 (equity dashboard uses 8080)
+chmod +x serve_options_dashboard.sh
+./serve_options_dashboard.sh
+```
+
+Then open: **http://localhost:8081/options_dashboard.html**
+
+To auto-rebuild every 5 minutes during market hours (run in a second terminal):
+
+```bash
+python3 options_regen_watcher.py
+```
+
+| Dashboard | URL | Port |
+|-----------|-----|------|
+| Equity agent | http://localhost:8080/dashboard.html | 8080 |
+| Options agent | http://localhost:8081/options_dashboard.html | 8081 |
+
+### Desktop shortcuts (Mac mini)
+
+Install double-click launchers on your Desktop:
+
+```bash
+cd ~/agents/trading-agent
+git pull origin cursor/options-trading-agent-be09
+chmod +x shortcuts/install_options_shortcuts.sh
+./shortcuts/install_options_shortcuts.sh
+```
+
+This creates:
+
+- **Start Options Agent.command** — runs `options_agent.py` (E*Trade auth when needed)
+- **Start Options Dashboard.command** — builds and serves the options dashboard on port 8081
+
+If macOS blocks the first run, right-click the shortcut → **Open**.
