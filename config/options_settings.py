@@ -48,3 +48,8 @@ REQUIRE_MARKET_TREND = True         # Respect BULL/BEAR trend filter
 # --- Paths ---
 OPTIONS_DB_PATH = "db/options_trades.db"
 OPTIONS_LOG_PATH = "logs/options_agent.log"
+
+# --- Dashboard HTTP server ---
+# Default 9080+ avoids conflicts with racing (8081), insider (8083), equity (8080).
+OPTIONS_DASHBOARD_PORT_START = 9080
+OPTIONS_DASHBOARD_PORT_END = 9099

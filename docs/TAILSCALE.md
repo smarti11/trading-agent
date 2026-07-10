@@ -52,7 +52,7 @@ Turn **Tailscale ON** on the phone, then open Safari:
 
 | Dashboard | URL |
 |-----------|-----|
-| **Options** | `http://100.x.x.x:8081/options_dashboard.html` |
+| **Options** | `http://100.x.x.x:9080/options_dashboard.html` (port printed at startup) |
 | **Equity** | `http://100.x.x.x:8080/dashboard.html` |
 
 Replace `100.x.x.x` with your Mac mini’s Tailscale IP.

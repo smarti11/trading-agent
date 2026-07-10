@@ -226,12 +226,12 @@ The options agent has its **own** dashboard — it does not modify `dashboard.ht
 # Generate dashboard HTML
 python3 options_dashboard.py
 
-# Serve on port 8081 (equity dashboard uses 8080)
-chmod +x serve_options_dashboard.sh
+# Serve on port 9080+ (avoids racing on 8081)
+chmod +x scripts/serve_options_dashboard.sh serve_options_dashboard.sh
 ./serve_options_dashboard.sh
 ```
 
-Then open: **http://localhost:8081/options_dashboard.html**
+Then open the URL printed in the terminal (e.g. **http://localhost:9080/options_dashboard.html**).
 
 To auto-rebuild every 5 minutes during market hours (run in a second terminal):
 
@@ -242,7 +242,9 @@ python3 options_regen_watcher.py
 | Dashboard | URL | Port |
 |-----------|-----|------|
 | Equity agent | http://localhost:8080/dashboard.html | 8080 |
-| Options agent | http://localhost:8081/options_dashboard.html | 8081 |
+| Options agent | http://localhost:9080/options_dashboard.html | 9080+ (auto) |
+| Racing agent | (your setup) | 8081 |
+| Insider | (your setup) | 8083 |
 
 ### Desktop shortcuts (Mac mini)
 
@@ -268,7 +270,7 @@ If macOS blocks the first run, right-click the shortcut → **Open**.
 
 ```bash
 tailscale ip -4
-# e.g. http://100.64.12.34:8081/options_dashboard.html
+# e.g. http://100.x.x.x:9080/options_dashboard.html
 ```
 
 Full setup: [docs/TAILSCALE.md](docs/TAILSCALE.md)
