@@ -21,4 +21,16 @@ echo "  Press Ctrl+C to stop"
 echo "============================================================"
 echo ""
 
-exec "$PYTHON" -m http.server 8080 --bind 0.0.0.0
+"$PYTHON" -m http.server 8080 --bind 0.0.0.0 &
+SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null; exit' EXIT INT TERM
+
+sleep 0.5
+if command -v open >/dev/null 2>&1; then
+  echo "Opening browser..."
+  open "http://localhost:8080/dashboard.html"
+else
+  echo "Open in browser: http://localhost:8080/dashboard.html"
+fi
+
+wait "$SERVER_PID"
