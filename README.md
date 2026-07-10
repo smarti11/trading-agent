@@ -261,3 +261,20 @@ This creates:
 - **Start Options Dashboard.command** — builds and serves the options dashboard on port 8081
 
 If macOS blocks the first run, right-click the shortcut → **Open**.
+
+### Phone access via Tailscale
+
+`localhost` does not work on your phone. Use your Mac mini **Tailscale IP** instead:
+
+```bash
+tailscale ip -4
+# e.g. http://100.64.12.34:8081/options_dashboard.html
+```
+
+Full setup: [docs/TAILSCALE.md](docs/TAILSCALE.md)
+
+```bash
+./shortcuts/setup_tailscale_dashboards.sh
+```
+
+Serve scripts bind to `0.0.0.0` so Tailscale peers can connect. Keep Tailscale **on** on your phone.

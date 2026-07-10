@@ -12,13 +12,17 @@ fi
 echo "Building options dashboard..."
 python3 options_dashboard.py
 
+TS_IP="$(tailscale ip -4 2>/dev/null || true)"
 PORT=8081
 echo ""
 echo "============================================================"
 echo "  OPTIONS DASHBOARD"
-echo "  Open: http://localhost:${PORT}/options_dashboard.html"
+echo "  Local:     http://localhost:${PORT}/options_dashboard.html"
+if [[ -n "$TS_IP" ]]; then
+  echo "  Tailscale: http://${TS_IP}:${PORT}/options_dashboard.html"
+fi
 echo "  Press Ctrl+C to stop the server"
 echo "============================================================"
 echo ""
 
-python3 -m http.server "$PORT"
+python3 -m http.server "$PORT" --bind 0.0.0.0
