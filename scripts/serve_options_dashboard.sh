@@ -1,61 +1,29 @@
 #!/bin/bash
-# Serve options dashboard on first free port in 9080-9099.
-# Does not touch racing (8081) or other agents. Binds 0.0.0.0 for Tailscale.
+# Serve options dashboard in Terminal (foreground). Opens browser.
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=options_dashboard_lib.sh
+source "$SCRIPT_DIR/options_dashboard_lib.sh"
+
+REPO="$(options_dashboard_repo)"
 cd "$REPO"
+mkdir -p logs config
 
-if [[ -d venv ]]; then
-  source venv/bin/activate
-fi
+options_dashboard_activate_venv "$REPO"
+options_dashboard_stop_existing "$REPO"
+options_dashboard_build "$REPO"
 
-PORT_START=9080
-PORT_END=9099
-if [[ -f config/options_settings.py ]]; then
-  read -r PORT_START PORT_END < <(python3 - <<'PY'
-from config.options_settings import OPTIONS_DASHBOARD_PORT_START, OPTIONS_DASHBOARD_PORT_END
-print(OPTIONS_DASHBOARD_PORT_START, OPTIONS_DASHBOARD_PORT_END)
-PY
-)
-fi
-
-echo "Building options dashboard..."
-python3 options_dashboard.py
-
-find_port() {
-  local port pid cwd
-  for port in $(seq "$PORT_START" "$PORT_END"); do
-    if ! lsof -ti tcp:"$port" >/dev/null 2>&1; then
-      echo "$port"
-      return 0
-    fi
-    pid=$(lsof -ti tcp:"$port" 2>/dev/null | head -1)
-    [[ -z "$pid" ]] && continue
-    cwd=$(lsof -p "$pid" 2>/dev/null | awk '/cwd/{print $NF}')
-    if [[ "$cwd" == *trading-agent* ]]; then
-      echo "Stopping old options dashboard on port $port (pid $pid)..." >&2
-      kill "$pid" 2>/dev/null || true
-      sleep 1
-      if ! lsof -ti tcp:"$port" >/dev/null 2>&1; then
-        echo "$port"
-        return 0
-      fi
-    fi
-  done
-  return 1
-}
-
-PORT="$(find_port)" || {
+read -r PORT_START PORT_END < <(options_dashboard_port_range "$REPO")
+PORT="$(options_dashboard_find_port "$PORT_START" "$PORT_END")" || {
   echo "ERROR: No free port in ${PORT_START}-${PORT_END}."
-  echo "Check: lsof -i -P -n | grep LISTEN | grep Python"
   exit 1
 }
 
 TS_IP="$(tailscale ip -4 2>/dev/null || true)"
 echo ""
 echo "============================================================"
-echo "  OPTIONS DASHBOARD"
+echo "  OPTIONS DASHBOARD (foreground)"
 echo "  Local:     http://localhost:${PORT}/options_dashboard.html"
 if [[ -n "$TS_IP" ]]; then
   echo "  Tailscale: http://${TS_IP}:${PORT}/options_dashboard.html"
@@ -73,8 +41,6 @@ sleep 0.5
 if command -v open >/dev/null 2>&1; then
   echo "Opening browser..."
   open "http://localhost:${PORT}/options_dashboard.html"
-else
-  echo "Open in browser: http://localhost:${PORT}/options_dashboard.html"
 fi
 
 wait "$SERVER_PID"

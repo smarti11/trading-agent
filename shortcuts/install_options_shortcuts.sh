@@ -27,10 +27,12 @@ echo ""
 
 install_one "Start Options Agent.command"
 install_one "Start Options Dashboard.command"
+install_one "Stop Options Dashboard.command"
 
 echo ""
 echo "Done. Double-click these on your Desktop:"
 echo "  • Start Options Agent.command"
-echo "  • Start Options Dashboard.command"
+echo "  • Start Options Dashboard.command  (background — no Terminal)"
+echo "  • Stop Options Dashboard.command"
 echo ""
 echo "First launch tip: if macOS blocks the script, right-click → Open."

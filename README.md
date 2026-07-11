@@ -260,9 +260,16 @@ chmod +x shortcuts/install_options_shortcuts.sh
 This creates:
 
 - **Start Options Agent.command** — runs `options_agent.py` (E*Trade auth when needed)
-- **Start Options Dashboard.command** — builds and serves the options dashboard on port 8081
+- **Start Options Dashboard.command** — starts dashboard **in background** (opens browser, no Terminal to keep open)
+- **Stop Options Dashboard.command** — stops the background dashboard server
 
-If macOS blocks the first run, right-click the shortcut → **Open**.
+Optional auto-start on Mac login:
+
+```bash
+./shortcuts/install_options_dashboard_background.sh
+```
+
+After starting, your phone URL uses the port in `config/.options_dashboard_port` (usually 9080).
 
 ### Phone access via Tailscale
 
