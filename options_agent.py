@@ -3,10 +3,11 @@ Options Trading Agent — Main Orchestrator
 ===========================================
 Directional long-options strategy driven by mean-reversion signals.
 
-  python options_agent.py              → paper trading (default)
-  python options_agent.py --live       → live trading (USE WITH CAUTION)
-  python options_agent.py --once       → single scan, then exit
-  python options_agent.py --summary    → print trade summary and exit
+  python options_agent.py                 → paper trading (default)
+  python options_agent.py --live          → live trading (USE WITH CAUTION)
+  python options_agent.py --once          → single scan, then exit
+  python options_agent.py --summary       → print trade summary and exit
+  python options_agent.py --force-close   → close all open option positions now
 
 Paper mode is enforced by config/settings.py — PAPER_TRADING must be
 explicitly set to False AND --live flag passed to enable live trading.
@@ -16,7 +17,8 @@ import argparse
 import logging
 import sys
 import time
-from datetime import datetime
+from datetime import date as date_cls, datetime
+from pathlib import Path
 
 from config.settings import PAPER_TRADING
 from config.options_settings import (
@@ -26,6 +28,7 @@ from config.options_settings import (
 from data.fetcher import get_most_active, get_symbol_data
 from data.corporate_events import is_safe_to_trade
 from data.options_fetcher import find_tradeable_contract, get_open_position_premiums
+from core.options.chain import OptionsContract
 from core.options.signals import evaluate_options
 from core.options.risk import OptionsRiskManager
 from core.market_trend import get_market_trend
@@ -74,34 +77,78 @@ def _monitor_open_positions(client: OptionsBroker, risk: OptionsRiskManager, mod
     pos = pos_by_key.get(contract_symbol)
     if not pos:
       continue
-    from core.options.chain import OptionsContract
-    from datetime import date as date_cls
+    _exit_position(client, pos, premium, reason, mode)
 
-    contract = OptionsContract(
-      underlying=pos["underlying"],
-      option_type=pos["option_type"],
-      strike=float(pos["strike"]),
-      expiration=date_cls.fromisoformat(pos["expiration"]),
-      bid=0, ask=0, last=premium, volume=0, open_interest=0,
-      implied_volatility=0, in_the_money=False,
-      contract_symbol=contract_symbol,
+
+def _exit_position(
+    client: OptionsBroker,
+    pos,
+    premium: float,
+    reason: str,
+    mode: str,
+) -> bool:
+  """Place SELL_CLOSE and record exit. Returns True on success."""
+  contract_symbol = pos["contract_symbol"]
+  contract = OptionsContract(
+    underlying=pos["underlying"],
+    option_type=pos["option_type"],
+    strike=float(pos["strike"]),
+    expiration=date_cls.fromisoformat(pos["expiration"]),
+    bid=0, ask=0, last=premium, volume=0, open_interest=0,
+    implied_volatility=0, in_the_money=False,
+    contract_symbol=contract_symbol,
+  )
+  contracts = pos["contracts"]
+  logger.info(
+    f"Exiting {contract_symbol} @ ${premium} ({reason}) — "
+    f"SELL_CLOSE {contracts} contracts"
+  )
+  try:
+    client.place_option_order(contract, contracts, opening=False)
+    close_option_position(contract_symbol, premium)
+    log_options_trade(
+      contract_symbol, pos["underlying"], pos["option_type"],
+      pos["strike"], pos["expiration"], "SELL_CLOSE", contracts,
+      premium, mode, "FILLED", notes=reason, strategy_version=CURRENT_VERSION,
     )
-    contracts = pos["contracts"]
-    logger.info(
-      f"Exiting {contract_symbol} @ ${premium} ({reason}) — "
-      f"SELL_CLOSE {contracts} contracts"
+    logger.info(f"  ✓ Closed {contract_symbol}")
+    return True
+  except Exception as e:
+    logger.error(f"Exit order failed for {contract_symbol}: {e}")
+    return False
+
+
+def force_close_all_positions(client: OptionsBroker, mode: str) -> int:
+  """Force-close every OPEN option position at current premium mark."""
+  open_pos = get_open_option_positions()
+  if not open_pos:
+    print("No open option positions to close.")
+    return 0
+
+  premiums = get_open_position_premiums(open_pos)
+  closed = 0
+  for pos in open_pos:
+    key = pos["contract_symbol"]
+    premium = premiums.get(key) or float(pos["entry_premium"])
+    entry = float(pos["entry_premium"])
+    contracts = int(pos["contracts"])
+    pnl = (premium - entry) * contracts * 100
+    print(
+      f"Force-closing {key}: {contracts}x {pos['option_type']} "
+      f"entry=${entry:.2f} → exit=${premium:.2f}  P&L ${pnl:+.2f}"
     )
-    try:
-      client.place_option_order(contract, contracts, opening=False)
-      close_option_position(contract_symbol, premium)
-      log_options_trade(
-        contract_symbol, pos["underlying"], pos["option_type"],
-        pos["strike"], pos["expiration"], "SELL_CLOSE", contracts,
-        premium, mode, "FILLED", notes=reason, strategy_version=CURRENT_VERSION,
-      )
-      logger.info(f"  ✓ Closed {contract_symbol}")
-    except Exception as e:
-      logger.error(f"Exit order failed for {contract_symbol}: {e}")
+    if _exit_position(client, pos, premium, "force_close", mode):
+      closed += 1
+
+  # Clear circuit breaker so new entries can resume after flat book
+  cb = Path(".options_circuit_breaker")
+  if cb.exists():
+    cb.unlink(missing_ok=True)
+    logger.info("Cleared options circuit breaker after force-close")
+    print("Cleared .options_circuit_breaker")
+
+  print(f"\nForce-closed {closed}/{len(open_pos)} position(s).")
+  return closed
 
 
 def _scan_for_signals(client: OptionsBroker, risk: OptionsRiskManager, mode: str) -> int:
@@ -210,6 +257,10 @@ def main():
                       help="Enable live trading (requires PAPER_TRADING=False)")
   parser.add_argument("--once", action="store_true", help="Run one scan then exit")
   parser.add_argument("--summary", action="store_true", help="Print summary and exit")
+  parser.add_argument(
+    "--force-close", action="store_true",
+    help="Force-close all open option positions at current premium, then exit",
+  )
   args = parser.parse_args()
 
   if args.summary:
@@ -223,6 +274,40 @@ def main():
     sys.exit(1)
 
   mode = "LIVE" if (args.live and not PAPER_TRADING) else "PAPER"
+
+  if args.force_close:
+    init_options_db()
+    open_pos = get_open_option_positions()
+    if not open_pos:
+      print("No open option positions.")
+      return
+    print(f"\nForce-closing {len(open_pos)} open option position(s) [{mode}]...")
+    for p in open_pos:
+      print(
+        f"  • {p['contract_symbol']}  {p['option_type']}  "
+        f"{p['contracts']}x @ ${float(p['entry_premium']):.2f}"
+      )
+    if mode == "LIVE":
+      confirm = input("\n⚠️  LIVE force-close. Type 'YES' to continue: ")
+      if confirm.strip() != "YES":
+        print("Aborted.")
+        sys.exit(0)
+    else:
+      confirm = input("\nType 'YES' to force-close these paper positions: ")
+      if confirm.strip() != "YES":
+        print("Aborted.")
+        sys.exit(0)
+
+    client = OptionsBroker()
+    try:
+      client.authenticate()
+      client.get_account_id()
+    except Exception as e:
+      logger.error(f"E*Trade auth failed: {e}")
+      sys.exit(1)
+    force_close_all_positions(client, mode)
+    print_options_summary()
+    return
 
   print(f"\n{'='*60}")
   print(f"  OPTIONS TRADING AGENT STARTING")
