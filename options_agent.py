@@ -287,16 +287,15 @@ def main():
         f"  • {p['contract_symbol']}  {p['option_type']}  "
         f"{p['contracts']}x @ ${float(p['entry_premium']):.2f}"
       )
-    if mode == "LIVE":
-      confirm = input("\n⚠️  LIVE force-close. Type 'YES' to continue: ")
-      if confirm.strip() != "YES":
-        print("Aborted.")
-        sys.exit(0)
-    else:
-      confirm = input("\nType 'YES' to force-close these paper positions: ")
-      if confirm.strip() != "YES":
-        print("Aborted.")
-        sys.exit(0)
+    prompt = (
+      "\n⚠️  LIVE force-close. Type YES to continue: "
+      if mode == "LIVE"
+      else "\nType YES to force-close these paper positions: "
+    )
+    confirm = input(prompt)
+    if confirm.strip().upper() != "YES":
+      print("Aborted.")
+      sys.exit(0)
 
     client = OptionsBroker()
     try:
