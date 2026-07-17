@@ -271,6 +271,31 @@ Optional auto-start on Mac login:
 
 After starting, your phone URL uses the port in `config/.options_dashboard_port` (usually 9080).
 
+### Weekday morning auto-start (options agent)
+
+So you don’t forget to start the agent (like a day with zero scans):
+
+```bash
+cd ~/agents/trading-agent
+git pull origin cursor/options-trading-agent-be09
+chmod +x shortcuts/install_options_agent_morning.sh
+./shortcuts/install_options_agent_morning.sh
+```
+
+This schedules **Mon–Fri 9:00 AM** (Mac local time — set timezone to **Eastern**).
+
+You still must complete **E*Trade auth once per day** when notified (tokens expire at midnight):
+
+```bash
+echo YOUR_CODE > ~/agents/trading-agent/config/.etrade_verifier
+```
+
+**Tomorrow morning checklist (backup if launchd isn’t installed yet):**
+
+1. By **9:00 AM ET**: double-click **Start Options Agent.command**
+2. Paste E*Trade verifier when prompted
+3. Confirm: `pgrep -fl options_agent.py` and `tail -f logs/options_agent.log`
+
 ### Phone access via Tailscale
 
 `localhost` does not work on your phone. Use your Mac mini **Tailscale IP** instead:
