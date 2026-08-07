@@ -16,6 +16,7 @@ from config.options_settings import (
     MIN_DTE, TARGET_DTE, MAX_DTE,
     MIN_DELTA, MAX_DELTA,
     MAX_BID_ASK_SPREAD_PCT, MIN_OPEN_INTEREST, MIN_VOLUME,
+    MIN_PREMIUM, ALLOW_PUTS,
 )
 
 
@@ -131,6 +132,8 @@ def select_contract(
   direction: "BUY" → call, "SELL" → put
   """
   option_type = "CALL" if direction == "BUY" else "PUT"
+  if option_type == "PUT" and not ALLOW_PUTS:
+    return None, "PUT entries disabled (v0.2 calls-only)"
   chain = calls_df if option_type == "CALL" else puts_df
   if chain is None or chain.empty:
     return None, f"No {option_type.lower()} chain for {underlying}"
@@ -142,7 +145,7 @@ def select_contract(
       continue
     if contract.open_interest < MIN_OPEN_INTEREST and contract.volume < MIN_VOLUME:
       continue
-    if contract.mid <= 0:
+    if contract.mid < MIN_PREMIUM:
       continue
     if contract.spread_pct > MAX_BID_ASK_SPREAD_PCT:
       continue
@@ -157,7 +160,10 @@ def select_contract(
     candidates.append((score, contract))
 
   if not candidates:
-    return None, f"No liquid {option_type} passed filters for {underlying}"
+    return None, (
+      f"No liquid {option_type} passed v0.2 filters for {underlying} "
+      f"(prem≥${MIN_PREMIUM}, δ {MIN_DELTA}-{MAX_DELTA}, DTE {MIN_DTE}-{MAX_DTE})"
+    )
 
   candidates.sort(key=lambda x: x[0])
   return candidates[0][1], "OK"

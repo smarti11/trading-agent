@@ -1,7 +1,7 @@
 """
 Options Trading Agent — Main Orchestrator
 ===========================================
-Directional long-options strategy driven by mean-reversion signals.
+v0.2 trend-dip: BULL-only long calls on dip-and-reclaim.
 
   python options_agent.py                 → paper trading (default)
   python options_agent.py --live          → live trading (USE WITH CAUTION)
@@ -23,7 +23,7 @@ from pathlib import Path
 from config.settings import PAPER_TRADING
 from config.options_settings import (
   OPTIONS_SCAN_INTERVAL_SEC, OPTIONS_PAPER_TRADING, OPTIONS_LOG_PATH,
-  OPTIONS_TRADE_AMOUNT_USD,
+  OPTIONS_TRADE_AMOUNT_USD, MAX_RISK_USD, MAX_CONTRACTS,
 )
 from data.fetcher import get_most_active, get_symbol_data
 from data.corporate_events import is_safe_to_trade
@@ -41,7 +41,7 @@ from db.options_database import (
   stamp_options_strategy_version,
 )
 
-CURRENT_VERSION = "options_v0.1_mean_reversion"
+CURRENT_VERSION = "options_v0.2_trend_dip"
 
 logging.basicConfig(
   level=logging.INFO,
@@ -194,8 +194,8 @@ def _scan_for_signals(client: OptionsBroker, risk: OptionsRiskManager, mode: str
     contracts = client.calculate_contracts(premium)
     if contracts < 1:
       logger.warning(
-        f"  ↳ {contract.contract_symbol} skipped — premium ${premium} "
-        f"exceeds ${OPTIONS_TRADE_AMOUNT_USD} budget"
+        f"  ↳ {contract.contract_symbol} skipped — premium ${premium:.2f} "
+        f"fails risk sizing (max risk ${MAX_RISK_USD}, max {MAX_CONTRACTS} contracts)"
       )
       continue
 
@@ -311,8 +311,9 @@ def main():
   print(f"\n{'='*60}")
   print(f"  OPTIONS TRADING AGENT STARTING")
   print(f"  Mode: {mode}")
-  print(f"  Strategy: mean-reversion long calls/puts")
-  print(f"  Budget per trade: ${OPTIONS_TRADE_AMOUNT_USD}")
+  print(f"  Strategy: v0.2 trend-dip (BULL calls only)")
+  print(f"  Max risk/trade: ${MAX_RISK_USD} · max {MAX_CONTRACTS} contracts")
+  print(f"  Budget cap: ${OPTIONS_TRADE_AMOUNT_USD}")
   print(f"  Scan interval: {OPTIONS_SCAN_INTERVAL_SEC}s")
   print(f"  Press Ctrl+C to stop")
   print(f"{'='*60}\n")
@@ -328,7 +329,7 @@ def main():
   init_options_db()
   stamp_options_strategy_version(
     CURRENT_VERSION,
-    "Mean-reversion directional long options with premium-based exits",
+    "BULL-only dip-and-reclaim long calls; risk-based size; -35%/+70% exits",
   )
   risk = OptionsRiskManager()
   client = OptionsBroker()

@@ -189,24 +189,20 @@ chmod +x run_options_agent.sh
 ./run_options_agent.sh --once
 ```
 
-### Options strategy
+### Options strategy (v0.2 trend-dip)
 
-| Equity signal | Options action |
-|---------------|----------------|
-| BUY (oversold) | Buy ATM/near-ATM **call** (~30–55 delta) |
-| SELL (overbought) | Buy ATM/near-ATM **put** |
+**BULL-only long calls** on dip-and-reclaim — not raw oversold mean-reversion.
 
-Contract selection filters: 21–60 DTE (target 35), min open interest/volume, max bid-ask spread 15%.
+| Gate | Rule |
+|------|------|
+| Regime | SPY **BULL** only |
+| Setup | Price above rising 20-MA + RSI dipped &lt; 40 in last 5d |
+| Trigger | RSI back ≥ 45 **or** price reclaims MA |
+| Contract | Prem ≥ $1, δ ~0.45–0.60, DTE 30–45, spread ≤ 8% |
+| Size | Max **$150** risk to stop, max **3** contracts |
+| Exits | −35% stop / +70% TP / trail after +40% / time-stop day 5 / 14 DTE |
 
-### Options risk parameters (`config/options_settings.py`)
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| OPTIONS_TRADE_AMOUNT_USD | $500 | Max premium budget per trade |
-| MAX_OPTIONS_POSITIONS | 3 | Max concurrent option positions |
-| STOP_LOSS_PREMIUM_PCT | 50% | Exit if premium falls 50% |
-| TAKE_PROFIT_PREMIUM_PCT | 100% | Exit if premium doubles |
-| FORCE_CLOSE_DTE | 7 | Close before expiration week |
+Puts are disabled until call edge is proven. Equity PATH_C is untouched.
 
 ### Live options trading
 

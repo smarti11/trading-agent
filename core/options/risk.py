@@ -1,11 +1,11 @@
 """
-Options Risk Manager
-====================
-Premium-based exits, DTE management, and position limits.
+Options Risk Manager — v0.2
+===========================
+Premium exits with tighter stops, time-stop, and trailing after +40%.
 """
 
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from pathlib import Path
 
 import pytz
@@ -14,6 +14,8 @@ from config.options_settings import (
   MAX_OPTIONS_POSITIONS, MAX_DAILY_LOSS_USD, NO_NEW_TRADES_AFTER,
   STOP_LOSS_PREMIUM_PCT, TAKE_PROFIT_PREMIUM_PCT, FORCE_CLOSE_DTE,
   MAX_HOLD_DAYS, EMERGENCY_FLOOR_PREMIUM_PCT, AGGREGATE_CB_USD,
+  TIME_STOP_DAYS, TIME_STOP_MIN_GAIN_PCT,
+  TRAIL_ACTIVATE_PCT, TRAIL_GIVEBACK_PCT,
 )
 from db.options_database import (
   get_open_option_positions, count_active_option_positions,
@@ -22,6 +24,9 @@ from db.options_database import (
 
 logger = logging.getLogger("options_agent")
 EASTERN = pytz.timezone("US/Eastern")
+
+# In-memory peak premiums for trailing (reset on process restart — acceptable for paper)
+_peak_premiums: dict[str, float] = {}
 
 
 class OptionsRiskManager:
@@ -91,38 +96,63 @@ class OptionsRiskManager:
       if premium is None:
         continue
 
-      entry = pos["entry_premium"]
+      entry = float(pos["entry_premium"])
       if entry <= 0:
         continue
 
       loss_pct = (entry - premium) / entry
       gain_pct = (premium - entry) / entry
 
+      # Track peak for trailing
+      peak = _peak_premiums.get(key, entry)
+      if premium > peak:
+        peak = premium
+        _peak_premiums[key] = peak
+
       exp = date.fromisoformat(pos["expiration"])
       dte = (exp - today).days
       if dte <= FORCE_CLOSE_DTE:
         to_close.append((key, premium, f"force_close_dte_{dte}"))
+        _peak_premiums.pop(key, None)
         continue
 
       entry_date = datetime.fromisoformat(pos["entry_ts"]).date() if pos["entry_ts"] else None
-      if entry_date and (today - entry_date).days >= MAX_HOLD_DAYS:
-        to_close.append((key, premium, f"age_exit_{(today - entry_date).days}d"))
+      age_days = (today - entry_date).days if entry_date else 0
+
+      if entry_date and age_days >= MAX_HOLD_DAYS:
+        to_close.append((key, premium, f"age_exit_{age_days}d"))
+        _peak_premiums.pop(key, None)
+        continue
+
+      # Time stop: not working by day N
+      if entry_date and age_days >= TIME_STOP_DAYS and gain_pct < TIME_STOP_MIN_GAIN_PCT:
+        to_close.append((key, premium, f"time_stop_{age_days}d"))
+        _peak_premiums.pop(key, None)
         continue
 
       if loss_pct >= EMERGENCY_FLOOR_PREMIUM_PCT:
         to_close.append((key, premium, "emergency_floor"))
+        _peak_premiums.pop(key, None)
         continue
 
-      if premium <= pos["stop_loss"]:
+      if premium <= float(pos["stop_loss"]):
         to_close.append((key, premium, "stop_loss"))
+        _peak_premiums.pop(key, None)
         continue
 
-      if premium >= pos["take_profit"]:
+      if premium >= float(pos["take_profit"]) or gain_pct >= TAKE_PROFIT_PREMIUM_PCT:
         to_close.append((key, premium, "take_profit"))
+        _peak_premiums.pop(key, None)
         continue
 
-      if gain_pct >= TAKE_PROFIT_PREMIUM_PCT:
-        to_close.append((key, premium, "take_profit"))
+      # Trail: once +TRAIL_ACTIVATE, exit if give back TRAIL_GIVEBACK from peak
+      peak_gain = (peak - entry) / entry
+      if peak_gain >= TRAIL_ACTIVATE_PCT:
+        giveback = (peak - premium) / peak if peak > 0 else 0
+        if giveback >= TRAIL_GIVEBACK_PCT:
+          to_close.append((key, premium, "trail_stop"))
+          _peak_premiums.pop(key, None)
+          continue
 
     return to_close
 

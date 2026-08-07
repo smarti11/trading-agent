@@ -2,14 +2,18 @@
 Options Order Placement
 =======================
 Extends E*Trade client with long call / long put order support.
+v0.2: risk-based sizing with contract cap.
 """
 
 import logging
-from datetime import datetime, date
+from datetime import datetime
 
 from broker.etrade import ETradeClient
 from core.options.chain import OptionsContract
-from config.options_settings import OPTIONS_TRADE_AMOUNT_USD, OPTIONS_PAPER_TRADING
+from config.options_settings import (
+  OPTIONS_TRADE_AMOUNT_USD, OPTIONS_PAPER_TRADING,
+  MAX_RISK_USD, MAX_CONTRACTS, STOP_LOSS_PREMIUM_PCT, MIN_PREMIUM,
+)
 
 logger = logging.getLogger("options_agent")
 
@@ -25,11 +29,20 @@ class OptionsBroker(ETradeClient):
   """E*Trade client with options order helpers."""
 
   def calculate_contracts(self, premium_per_contract: float) -> int:
-    """How many contracts fit in OPTIONS_TRADE_AMOUNT_USD budget."""
-    if premium_per_contract <= 0:
+    """
+    Risk-based size: max contracts such that stop-loss $ risk ≤ MAX_RISK_USD,
+    also capped by OPTIONS_TRADE_AMOUNT_USD and MAX_CONTRACTS.
+    """
+    if premium_per_contract < MIN_PREMIUM:
       return 0
     cost_per = premium_per_contract * 100
-    contracts = int(OPTIONS_TRADE_AMOUNT_USD / cost_per)
+    risk_per = cost_per * STOP_LOSS_PREMIUM_PCT
+    if risk_per <= 0:
+      return 0
+
+    by_risk = int(MAX_RISK_USD / risk_per)
+    by_budget = int(OPTIONS_TRADE_AMOUNT_USD / cost_per)
+    contracts = min(by_risk, by_budget, MAX_CONTRACTS)
     return max(contracts, 0)
 
   def place_option_order(
