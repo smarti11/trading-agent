@@ -1,7 +1,9 @@
 # ============================================================
-# Options Trading Agent Configuration — v0.2 trend-dip
+# Options Trading Agent Configuration — options_v0.2_trend_dip (LOCKED)
 # ============================================================
 # Strategy: BULL-only long calls on dip-and-reclaim (not raw oversold).
+# v0.1 mean-reversion (calls+puts on any trend) is retired — do not
+# re-enable ALLOW_PUTS or drop REQUIRE_BULL_ONLY to bring it back.
 # Does not affect equity PATH_C lock.
 # ============================================================
 
@@ -51,7 +53,6 @@ NO_NEW_TRADES_AFTER = "15:30"
 ALLOW_PUTS = False                  # Freeze puts until call edge proven
 ALLOW_CALLS = True
 REQUIRE_BULL_ONLY = True            # No CHOP / BEAR entries
-REQUIRE_MARKET_TREND = True         # kept for compatibility
 
 # Dip / reclaim thresholds
 MA_PERIOD = 20
