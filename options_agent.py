@@ -169,10 +169,10 @@ def _scan_for_signals(client: OptionsBroker, risk: OptionsRiskManager, mode: str
       continue
 
     signal = evaluate_options(symbol, sym_data.closes, market_trend=current_trend)
+    signal_id = log_options_signal(signal)
     if signal.direction == "NONE":
       continue
 
-    signal_id = log_options_signal(signal)
     option_label = "CALL" if signal.direction == "BUY" else "PUT"
     logger.info(f"OPTIONS SIGNAL [{option_label}] {symbol} | {signal.reason}")
 
