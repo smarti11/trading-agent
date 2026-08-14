@@ -92,6 +92,12 @@ def init_options_db():
       description     TEXT
     );
     """)
+    try:
+      conn.execute(
+        "ALTER TABLE options_positions ADD COLUMN auto_managed INTEGER DEFAULT 1"
+      )
+    except Exception:
+      pass
   cleanup_stale_pending_option_positions()
   logger.info("Options database initialized")
 
@@ -144,17 +150,19 @@ def log_options_trade(
 
 def open_option_position_pending(
     contract_symbol, underlying, option_type, strike, expiration,
-    contracts, entry_premium, stop_loss, take_profit,
+    contracts, entry_premium, stop_loss, take_profit, auto_managed=1,
 ):
   with get_conn() as conn:
     conn.execute("""
       INSERT OR REPLACE INTO options_positions
         (contract_symbol, underlying, option_type, strike, expiration,
-         contracts, entry_premium, entry_ts, stop_loss, take_profit, status)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'PENDING')
+         contracts, entry_premium, entry_ts, stop_loss, take_profit, status,
+         auto_managed)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'PENDING',?)
     """, (
       contract_symbol, underlying, option_type, strike, expiration,
       contracts, entry_premium, datetime.now().isoformat(), stop_loss, take_profit,
+      auto_managed,
     ))
 
 

@@ -119,13 +119,17 @@ class OptionsRiskManager:
       entry_date = datetime.fromisoformat(pos["entry_ts"]).date() if pos["entry_ts"] else None
       age_days = (today - entry_date).days if entry_date else 0
 
-      if entry_date and age_days >= MAX_HOLD_DAYS:
+      # Duration-based exits assume ~30-45 DTE swing trades; skip them for
+      # positions explicitly opened outside that (e.g. manual LEAPS holds).
+      auto_managed = pos["auto_managed"] if "auto_managed" in pos.keys() else 1
+
+      if auto_managed and entry_date and age_days >= MAX_HOLD_DAYS:
         to_close.append((key, premium, f"age_exit_{age_days}d"))
         _peak_premiums.pop(key, None)
         continue
 
       # Time stop: not working by day N
-      if entry_date and age_days >= TIME_STOP_DAYS and gain_pct < TIME_STOP_MIN_GAIN_PCT:
+      if auto_managed and entry_date and age_days >= TIME_STOP_DAYS and gain_pct < TIME_STOP_MIN_GAIN_PCT:
         to_close.append((key, premium, f"time_stop_{age_days}d"))
         _peak_premiums.pop(key, None)
         continue
