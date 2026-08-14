@@ -1,7 +1,8 @@
-"""Rebuilds dashboard.html every 5 minutes by running dashboard.py as a subprocess.
+"""Rebuilds dashboard.html and options_dashboard.html every 5 minutes by
+running dashboard.py / options_dashboard.py as subprocesses.
 
-Run alongside agent.py and the HTTP server. Path resolution uses
-Path(__file__).parent so the script is cwd-independent.
+Run alongside agent.py, options_agent.py, and the HTTP server. Path
+resolution uses Path(__file__).parent so the script is cwd-independent.
 """
 
 import logging
@@ -26,47 +27,53 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DASHBOARD_SCRIPT = ROOT / "dashboard.py"
+DASHBOARD_SCRIPTS = [ROOT / "dashboard.py", ROOT / "options_dashboard.py"]
 REBUILD_INTERVAL_S = 5 * 60
 SUBPROCESS_TIMEOUT_S = 60
 
 
-def rebuild() -> bool:
-    """Run dashboard.py as a subprocess. Returns True on success."""
+def rebuild(script: Path) -> bool:
+    """Run the given dashboard script as a subprocess. Returns True on success."""
     try:
         result = subprocess.run(
-            [sys.executable, str(DASHBOARD_SCRIPT)],
+            [sys.executable, str(script)],
             cwd=str(ROOT),
             timeout=SUBPROCESS_TIMEOUT_S,
             capture_output=True,
             text=True,
         )
         if result.returncode == 0:
-            logger.info("Dashboard rebuilt OK")
+            logger.info("%s rebuilt OK", script.name)
             return True
         logger.error(
-            "dashboard.py exited %d: %s",
+            "%s exited %d: %s",
+            script.name,
             result.returncode,
             result.stderr.strip()[:300] or result.stdout.strip()[:300],
         )
         return False
     except subprocess.TimeoutExpired:
-        logger.error("dashboard.py timed out after %ds — killed", SUBPROCESS_TIMEOUT_S)
+        logger.error("%s timed out after %ds — killed", script.name, SUBPROCESS_TIMEOUT_S)
         return False
     except Exception as e:
-        logger.error("Rebuild failed: %s", e, exc_info=True)
+        logger.error("Rebuild of %s failed: %s", script.name, e, exc_info=True)
         return False
+
+
+def rebuild_all():
+    for script in DASHBOARD_SCRIPTS:
+        rebuild(script)
 
 
 def main():
     logger.info("Trading regen watcher starting")
-    logger.info("Script: %s", DASHBOARD_SCRIPT)
+    logger.info("Scripts: %s", ", ".join(s.name for s in DASHBOARD_SCRIPTS))
     logger.info("Rebuild interval: %d min", REBUILD_INTERVAL_S // 60)
 
     risk = RiskManager()
 
     logger.info("Initial build")
-    rebuild()
+    rebuild_all()
 
     while True:
         time.sleep(REBUILD_INTERVAL_S)
@@ -74,7 +81,7 @@ def main():
             logger.info("Market closed — skipping dashboard rebuild")
             continue
         logger.info("Periodic rebuild (%dmin)", REBUILD_INTERVAL_S // 60)
-        rebuild()
+        rebuild_all()
 
 
 if __name__ == "__main__":
