@@ -42,6 +42,13 @@ class OptionsRiskManager:
     market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
     return market_open <= now <= market_close
 
+  def is_after_market_close(self) -> bool:
+    """True once today's regular session (16:00 ET) has ended — used to
+    exit the scan loop for the day instead of polling all night."""
+    now = self.get_eastern_time()
+    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    return now >= market_close
+
   def is_too_late_to_trade(self) -> bool:
     now = self.get_eastern_time()
     cutoff_h, cutoff_m = map(int, NO_NEW_TRADES_AFTER.split(":"))

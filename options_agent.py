@@ -357,6 +357,10 @@ def main():
     while True:
       try:
         run_scan(client, risk, mode)
+        if risk.is_after_market_close():
+          logger.info("Market session ended — exiting for the day (start me again next session)")
+          print_options_summary()
+          break
         logger.info(f"Sleeping {OPTIONS_SCAN_INTERVAL_SEC}s until next scan...")
         time.sleep(OPTIONS_SCAN_INTERVAL_SEC)
       except KeyboardInterrupt:
