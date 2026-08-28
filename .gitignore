@@ -10,11 +10,16 @@ db/*.db-wal
 db/*.db-shm
 db/*.db.bak*
 config/.etrade_*
+config/.options_dashboard_port
+config/.options_dashboard.pid
+config/.options_agent.pid
 config/*.token
 config/*.key
 config/*.secret
 .DS_Store
 dashboard.html
+options_dashboard.html
 dashboard.log
 .circuit_breaker
+.options_circuit_breaker
 .regen_now
