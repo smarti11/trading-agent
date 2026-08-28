@@ -6,6 +6,8 @@ Contract selection, OCC symbol formatting, and chain helpers.
 
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Optional
@@ -18,6 +20,22 @@ from config.options_settings import (
     MAX_BID_ASK_SPREAD_PCT, MIN_OPEN_INTEREST, MIN_VOLUME,
     MIN_PREMIUM, ALLOW_PUTS,
 )
+
+logger = logging.getLogger("options_agent")
+
+
+def _safe_int(value, default: int = 0) -> int:
+  """int() that treats NaN (common for volume/openInterest on illiquid
+  strikes in yfinance chains) as `default` instead of raising ValueError."""
+  if value is None:
+    return default
+  try:
+    f = float(value)
+  except (TypeError, ValueError):
+    return default
+  if math.isnan(f):
+    return default
+  return int(f)
 
 
 @dataclass
@@ -111,8 +129,8 @@ def _row_to_contract(
     bid=bid,
     ask=ask,
     last=last,
-    volume=int(row.get("volume", 0) or 0),
-    open_interest=int(row.get("openInterest", 0) or 0),
+    volume=_safe_int(row.get("volume", 0)),
+    open_interest=_safe_int(row.get("openInterest", 0)),
     implied_volatility=float(row.get("impliedVolatility", 0) or 0),
     in_the_money=bool(row.get("inTheMoney", False)),
     contract_symbol=build_occ_symbol(underlying, expiration, option_type, strike),
@@ -139,8 +157,14 @@ def select_contract(
     return None, f"No {option_type.lower()} chain for {underlying}"
 
   candidates: list[tuple[float, OptionsContract]] = []
-  for _, row in chain.iterrows():
-    contract = _row_to_contract(underlying, option_type, expiration, row)
+  for i, row in chain.iterrows():
+    try:
+      contract = _row_to_contract(underlying, option_type, expiration, row)
+    except Exception as e:
+      # One malformed chain row (bad vendor data) shouldn't abort contract
+      # selection for the whole symbol — skip it and keep scanning the rest.
+      logger.warning(f"{underlying}: skipping unparseable {option_type} chain row {i}: {e}")
+      continue
     if contract.dte < MIN_DTE or contract.dte > MAX_DTE:
       continue
     if contract.open_interest < MIN_OPEN_INTEREST and contract.volume < MIN_VOLUME:
