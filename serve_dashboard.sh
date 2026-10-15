@@ -3,6 +3,13 @@
 REPO="${TRADING_AGENT_HOME:-$HOME/agents/trading-agent}"
 cd "$REPO" || exit 1
 
+# Clear out anything already bound to the port (stale process from a previous run/crash)
+EXISTING_PID="$(lsof -ti tcp:8080 2>/dev/null || true)"
+if [[ -n "$EXISTING_PID" ]]; then
+  kill -9 $EXISTING_PID 2>/dev/null || true
+  sleep 0.5
+fi
+
 if [[ -d venv ]]; then
   PYTHON="$REPO/venv/bin/python3"
 else
