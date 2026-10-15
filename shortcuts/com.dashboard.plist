@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dashboard</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>REPO_PATH/scripts/start_dashboard_background.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>REPO_PATH</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- start_dashboard_background.sh backgrounds the server and exits, so
+         KeepAlive would make launchd respawn it in a loop (each run kills the
+         live server on the port). RunAtLoad alone is enough. -->
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>REPO_PATH/logs/dashboard_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>REPO_PATH/logs/dashboard_launchd.log</string>
+</dict>
+</plist>
