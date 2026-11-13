@@ -308,3 +308,16 @@ Full setup: [docs/TAILSCALE.md](docs/TAILSCALE.md)
 ```
 
 Serve scripts bind to `0.0.0.0` so Tailscale peers can connect. Keep Tailscale **on** on your phone.
+
+## SPY 200-day trend agent (`trend_agent.py`)
+
+Replaces the options agent (no edge in backtests or paper trading). Once a day at 3:50 PM ET it holds **SPY** if SPY is above its 200-day average, otherwise **SGOV** (T-bills). Backtest 2007–2026: 9.0% CAGR, −20.5% max drawdown vs buy-and-hold 10.8% / −55.2%.
+
+```bash
+python trend_agent.py --status    # holdings, last 10 days, trades
+python trend_agent.py --dry-run   # today's decision, no changes
+cp scripts/com.tradingagent.trendagent.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.tradingagent.trendagent.plist
+```
+
+Paper mode (`PAPER_TRADING = True`) simulates fills from a $10,000 start in `db/trend.db` and needs no E*Trade login. Live mode places market orders through E*Trade and needs that day's login before 3:50 PM. Settings: `config/trend_settings.py`.
