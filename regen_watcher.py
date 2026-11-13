@@ -1,5 +1,5 @@
-"""Rebuilds dashboard.html and options_dashboard.html every 5 minutes by
-running dashboard.py / options_dashboard.py as subprocesses.
+"""Rebuilds dashboard.html and the SPY trend dashboard every 5 minutes by
+running dashboard.py / trend_dashboard.py as subprocesses.
 
 Run alongside agent.py, options_agent.py, and the HTTP server. Path
 resolution uses Path(__file__).parent so the script is cwd-independent.
@@ -27,7 +27,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DASHBOARD_SCRIPTS = [ROOT / "dashboard.py", ROOT / "options_dashboard.py"]
+DASHBOARD_SCRIPTS = [ROOT / "dashboard.py", ROOT / "trend_dashboard.py"]
 REBUILD_INTERVAL_S = 5 * 60
 SUBPROCESS_TIMEOUT_S = 60
 
