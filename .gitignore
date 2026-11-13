@@ -23,3 +23,4 @@ dashboard.log
 .circuit_breaker
 .options_circuit_breaker
 .regen_now
+trend_dashboard.html

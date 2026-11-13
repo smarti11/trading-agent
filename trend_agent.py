@@ -224,6 +224,13 @@ def main():
     conn.commit()
     logger.info(f"Holding {shares} {held or '-'} | cash ${cash:,.2f} | equity ${equity:,.2f}")
 
+    try:
+        import subprocess
+        subprocess.run([sys.executable, "trend_dashboard.py"], timeout=60, check=True,
+                       capture_output=True)
+    except Exception as e:
+        logger.warning(f"Dashboard rebuild failed: {e}")
+
 
 if __name__ == "__main__":
     try:
