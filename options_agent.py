@@ -15,6 +15,7 @@ explicitly set to False AND --live flag passed to enable live trading.
 
 import argparse
 import logging
+import os
 import sys
 import time
 from datetime import date as date_cls, datetime
@@ -360,7 +361,11 @@ def main():
         if risk.is_after_market_close():
           logger.info("Market session ended — exiting for the day (start me again next session)")
           print_options_summary()
-          break
+          # os._exit, not break/sys.exit: a lingering non-daemon thread can
+          # silently keep the interpreter alive through normal shutdown —
+          # os._exit bypasses that and actually terminates the process.
+          logging.shutdown()
+          os._exit(0)
         logger.info(f"Sleeping {OPTIONS_SCAN_INTERVAL_SEC}s until next scan...")
         time.sleep(OPTIONS_SCAN_INTERVAL_SEC)
       except KeyboardInterrupt:
