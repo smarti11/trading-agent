@@ -17,6 +17,7 @@ Usage:
   python trend_agent.py --dry-run  # show the decision, change nothing
   python trend_agent.py --status   # show holdings and history
   python trend_agent.py --force    # run again even if today is done
+  python trend_agent.py --notify   # midday heads-up notification, no trading
 """
 
 from __future__ import annotations
@@ -164,6 +165,16 @@ def rebalance(conn, target: str, reason: str):
 # Main
 # ---------------------------------------------------------------------------
 
+def notify(title: str, message: str):
+    """macOS notification (shows on the Mac mini's screen)."""
+    import subprocess
+    esc = lambda t: t.replace("\\", "\\\\").replace('"', '\\"')
+    subprocess.run(["osascript", "-e",
+                    f'display notification "{esc(message)}" with title "{esc(title)}" sound name "Glass"'],
+                   check=False, timeout=10)
+    logger.info(f"Notification: {title} — {message}")
+
+
 def status(conn):
     cash, held, shares = get_account(conn)
     value = shares * last_price(held) if held and shares else 0.0
@@ -184,6 +195,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--notify", action="store_true",
+                    help="post a macOS notification with today's signal; no trading")
     args = ap.parse_args()
 
     conn = db()
@@ -192,7 +205,7 @@ def main():
         return
 
     today = date.today()
-    if not args.force and conn.execute("SELECT 1 FROM daily WHERE day = ?", (today.isoformat(),)).fetchone():
+    if not (args.force or args.notify) and conn.execute("SELECT 1 FROM daily WHERE day = ?", (today.isoformat(),)).fetchone():
         logger.info("Already ran today — use --force to run again")
         return
 
@@ -207,6 +220,15 @@ def main():
     gap = 100 * (price / ma - 1)
     reason = f"{TREND_SYMBOL} ${price:.2f} vs MA{MA_DAYS} ${ma:.2f} ({gap:+.2f}%) → {signal}"
     logger.info(f"--- Trend check [{MODE}] {today} | {reason} | holding {shares} {held or '-'} ---")
+
+    if args.notify:
+        if target == held and shares > 0:
+            msg = f"No change expected at 3:50 PM — staying in {held}."
+        else:
+            msg = f"3:50 PM check would switch {held or 'cash'} → {target}."
+        notify(f"SPY trend: {signal} ({gap:+.2f}% vs {MA_DAYS}-day)",
+               f"SPY ${price:.2f} vs ${ma:.2f}. {msg}")
+        return
 
     if args.dry_run:
         print(f"Would hold {target}" + ("" if target == held else f" (switch from {held or 'cash'})"))
