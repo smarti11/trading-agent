@@ -63,6 +63,10 @@ class ETradeClient:
     # Authentication (OAuth 1.0a — browser flow)
     # ------------------------------------------------------------------
 
+    def _oauth_base(self) -> str:
+        """OAuth token endpoints: sandbox uses apisb, live uses api."""
+        return SANDBOX_BASE if self.paper else LIVE_BASE
+
     def authenticate(self):
         """
         Full OAuth 1.0a flow. On first run, opens browser for authorization.
@@ -74,15 +78,15 @@ class ETradeClient:
 
         logger.info("Starting E*Trade OAuth flow...")
 
-        # Step 1: Request token
-        request_token_url = f"https://api.etrade.com/oauth/request_token"
+        oauth_base = self._oauth_base()
+        request_token_url = f"{oauth_base}/oauth/request_token"
         oauth = OAuth1Session(self.key, client_secret=self.secret,
                               callback_uri="oob")
         fetch_response = oauth.fetch_request_token(request_token_url)
         resource_owner_key    = fetch_response.get("oauth_token")
         resource_owner_secret = fetch_response.get("oauth_token_secret")
 
-        # Step 2: Redirect user to authorize
+        # Authorization page is always on us.etrade.com (even for sandbox keys).
         auth_url = f"https://us.etrade.com/e/t/etws/authorize"
         auth_url += f"?key={self.key}&token={resource_owner_key}"
         print(f"\n{'='*60}")
@@ -94,8 +98,8 @@ class ETradeClient:
         # Step 3: User pastes verifier code (TTY-safe — works under nohup too)
         verifier = self._read_verifier(auth_url)
 
-        # Step 4: Exchange for access token
-        access_token_url = f"https://api.etrade.com/oauth/access_token"
+        # Step 4: Exchange for access token (sandbox → apisb, live → api)
+        access_token_url = f"{oauth_base}/oauth/access_token"
         oauth = OAuth1Session(
             self.key, client_secret=self.secret,
             resource_owner_key=resource_owner_key,

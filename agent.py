@@ -15,6 +15,7 @@ This double-gate prevents accidental live execution.
 
 import argparse
 import logging
+import os
 import time
 import sys
 from datetime import datetime
@@ -313,6 +314,17 @@ def main():
         while True:
             try:
                 run_scan(client, risk, mode)
+                et_now = risk.get_eastern_time()
+                if not risk.is_market_open() and et_now.hour >= 16:
+                    logger.info("Market session ended — exiting for the day (start me again next session)")
+                    print_summary()
+                    # os._exit, not break/sys.exit: a lingering non-daemon
+                    # thread (e.g. HTTP connection pooling) can silently keep
+                    # the interpreter alive through a normal shutdown even
+                    # after this branch runs — os._exit bypasses that and
+                    # actually terminates the process.
+                    logging.shutdown()
+                    os._exit(0)
                 logger.info(f"Sleeping {SCAN_INTERVAL_SEC}s until next scan...")
                 time.sleep(SCAN_INTERVAL_SEC)
             except KeyboardInterrupt:
